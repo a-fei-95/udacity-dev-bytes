@@ -26,6 +26,7 @@ import android.view.ViewGroup
 import androidx.annotation.LayoutRes
 import androidx.databinding.DataBindingUtil
 import androidx.fragment.app.Fragment
+import androidx.fragment.app.viewModels
 import androidx.lifecycle.Observer
 //import androidx.lifecycle.ViewModelProviders
 import androidx.lifecycle.ViewModelProvider
@@ -42,25 +43,38 @@ import com.example.android.devbyteviewer.viewmodels.DevByteViewModel
  */
 class DevByteFragment : Fragment() {
 
+    private lateinit var binding: FragmentDevByteBinding
+
     /**
      * One way to delay creation of the viewModel until an appropriate lifecycle method is to use
      * lazy. This requires that viewModel not be referenced before onViewCreated(), which we
      * do in this Fragment.
      */
-    private val viewModel: DevByteViewModel by lazy {
-        val activity = requireNotNull(this.activity) {
-            "You can only access the viewModel after onViewCreated()"
+    private val viewModel: DevByteViewModel by viewModels()
+
+    private val videoClickListener = VideoClick {
+        // When a video is clicked this block or lambda will be called by DevByteAdapter
+
+        // context is not around, we can safely discard this click since the Fragment is no
+        // longer on the screen
+        val packageManager = context?.packageManager ?: return@VideoClick
+
+        // Try to generate a direct intent to the YouTube app
+        var intent = Intent(Intent.ACTION_VIEW, it.launchUri)
+        if (intent.resolveActivity(packageManager) == null) {
+            // YouTube app isn't found, use the web url
+            intent = Intent(Intent.ACTION_VIEW, Uri.parse(it.url))
         }
-        //The ViewModelProviders (plural) is deprecated.  
-        //ViewModelProviders.of(this, DevByteViewModel.Factory(activity.application)).get(DevByteViewModel::class.java)
-        ViewModelProvider(this, DevByteViewModel.Factory(activity.application)).get(DevByteViewModel::class.java)
-                
+
+        startActivity(intent)
     }
 
     /**
      * RecyclerView Adapter for converting a list of Video to cards.
      */
-    private var viewModelAdapter: DevByteAdapter? = null
+    private val viewModelAdapter by lazy {
+        DevByteAdapter(videoClickListener)
+    }
 
     /**
      * Called immediately after onCreateView() has returned, and fragment's
@@ -70,11 +84,11 @@ class DevByteFragment : Fragment() {
      */
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         super.onViewCreated(view, savedInstanceState)
-        viewModel.playlist.observe(viewLifecycleOwner, Observer<List<Video>> { videos ->
+        viewModel.playlist.observe(viewLifecycleOwner) { videos ->
             videos?.apply {
-                viewModelAdapter?.videos = videos
+                viewModelAdapter.videos = videos
             }
-        })
+        }
     }
 
     /**
@@ -94,37 +108,17 @@ class DevByteFragment : Fragment() {
      * @return Return the View for the fragment's UI.
      */
     override fun onCreateView(inflater: LayoutInflater, container: ViewGroup?,
-                              savedInstanceState: Bundle?): View? {
-        val binding: FragmentDevByteBinding = DataBindingUtil.inflate(
-                inflater,
-                R.layout.fragment_dev_byte,
-                container,
-                false)
-        // Set the lifecycleOwner so DataBinding can observe LiveData
-        binding.setLifecycleOwner(viewLifecycleOwner)
+                              savedInstanceState: Bundle?): View {
+        binding = FragmentDevByteBinding.inflate(inflater)
 
-        binding.viewModel = viewModel
+        with(binding) {
+            lifecycleOwner = viewLifecycleOwner
+            viewModel = this@DevByteFragment.viewModel
 
-        viewModelAdapter = DevByteAdapter(VideoClick {
-            // When a video is clicked this block or lambda will be called by DevByteAdapter
-
-            // context is not around, we can safely discard this click since the Fragment is no
-            // longer on the screen
-            val packageManager = context?.packageManager ?: return@VideoClick
-
-            // Try to generate a direct intent to the YouTube app
-            var intent = Intent(Intent.ACTION_VIEW, it.launchUri)
-            if(intent.resolveActivity(packageManager) == null) {
-                // YouTube app isn't found, use the web url
-                intent = Intent(Intent.ACTION_VIEW, Uri.parse(it.url))
+            recyclerView.apply {
+                layoutManager = LinearLayoutManager(context)
+                adapter = viewModelAdapter
             }
-
-            startActivity(intent)
-        })
-
-        binding.root.findViewById<RecyclerView>(R.id.recycler_view).apply {
-            layoutManager = LinearLayoutManager(context)
-            adapter = viewModelAdapter
         }
 
         return binding.root
@@ -156,7 +150,7 @@ class VideoClick(val block: (Video) -> Unit) {
 /**
  * RecyclerView Adapter for setting up data binding on the items in the list.
  */
-class DevByteAdapter(val callback: VideoClick) : RecyclerView.Adapter<DevByteViewHolder>() {
+class DevByteAdapter(private val callback: VideoClick) : RecyclerView.Adapter<DevByteViewHolder>() {
 
     /**
      * The videos that our Adapter will show
